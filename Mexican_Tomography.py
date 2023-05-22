@@ -15,15 +15,15 @@ import Subunit_Model
 # Global parameters
 ###############################################################################
 SCENARIO = 'realistic gauss'            # Model subunit layout type.
-NUM_SUBUNITS = 10 #None                     # Model number of subunits.
-RNG_SEED = 100 #None                         # Model random seed used for generating the subunit layout (and potentially number).
+NUM_SUBUNITS = 10                       # Model number of subunits.
+RNG_SEED = 100                          # Model random seed used for generating the subunit layout (and potentially number).
 SUBUNIT_NL = 'threshold-linear'         # Model nonlinearity of the subunits.
 SYNAPTIC_WEIGHTS = 'equal'              # Model weights of the individual subunits.
 RGC_NL = None                           # Model output nonlinearity.
 RESOLUTION = 40                         # Width and height of the simulated area in pixels.
 NUM_POSITIONS = 60                      # Number of bar positions.
 NUM_ANGLES = 36                         # Number of bar angles.
-HAT_STD = (RESOLUTION/40) * 2.5           # Standard deviation sigma of the bar profile. The prefactor makes it independent of the resolution.
+HAT_STD = (RESOLUTION/40) * 2.5         # Standard deviation sigma of the bar profile. The prefactor makes it independent of the resolution.
 SURROUND_FACTOR = 2.5                   # Factor that strengthens the suppressive surround of the stimulus.
 
 
