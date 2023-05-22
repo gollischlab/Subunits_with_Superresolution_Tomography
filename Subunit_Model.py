@@ -497,20 +497,20 @@ def Scenario_realistic_gauss(resolution, num_subunits, rng_seed, overlap_factor,
     """
 
     # Setting up random generator
-    np.random.seed(rng_seed)
+    rng = np.random.default_rng(seed=rng_seed)
 
     # local constants
     size = 100
     sqrt_num_points = 8
     if num_subunits is None:
-        num_subunits = np.random.randint(4, 13)
+        num_subunits = rng.integers(4, 13)
 
     # Generating a perturbed hexagonal grid
     xx, yy = np.mgrid[0:size:sqrt_num_points*1j, 0:size:sqrt_num_points*1j]
     points = np.transpose(np.vstack([xx.ravel(), yy.ravel()]))
     points[::2, 0] += size/(sqrt_num_points-1)/2
     points[:, 1] *= np.sqrt(3)/2
-    points = points + np.random.normal(scale=irregularity, size=points.shape)
+    points = points + rng.normal(scale=irregularity, size=points.shape)
 
     # Calculating the voronoi sets
     xx, yy = np.mgrid[0:size, 0:size]
@@ -934,8 +934,10 @@ def Spiking_poisson(coefficient, shift):
             The result of the spiking process applied to *response*.
     """
 
+    rng = np.random.default_rng()
+
     def Spikes(response):
-        return np.random.poisson(coefficient * (response + shift))
+        return rng.poisson(coefficient * (response + shift))
 
     return Spikes
 
