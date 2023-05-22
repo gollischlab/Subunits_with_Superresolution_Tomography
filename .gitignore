@@ -1,0 +1,4 @@
+# Ignore all png files, which result from running the scripts.
+*.png
+# Ignore all files inside the __pycache__ directory
+__pycache__/
