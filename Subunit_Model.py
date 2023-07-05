@@ -10,12 +10,14 @@ import scipy.optimize as opt
 # Dictionary storing the default parameters of the class
 ###############################################################################
 DEFAULT_PARAMS = {"num_subunits" : None,                            # Planned number of subunits of the model. Note that this might be overruled by the subunit scenario. If None, this option has no effect.
-                  "rng_seed" : None,                                # Non-negative seed of the random number generator in the subunit scenario 'realistic gauss'.  If None, a random seed is used.
+                  "layout_seed" : None,                             # Non-negative seed of the random number generator in the subunit scenario 'realistic gauss'. If None, a random seed is used.
                   "overlap_factor" : 1.35,                          # Regulates the size of the subunits in the scenario 'realistic gauss' without changing their spacing, thereby adjusting their overlap. Note that the value is not related to any meaningful measure.
                   "irregularity" : 3,                               # Determines how strongly the subunit layout in the scenario 'realistic gauss' deviates from a hexagonal grid.
                   "swap_gauss_for_cosine" : False,                  # If True, subunit layouts which normally use Gaussian subunits, will instead use cosine-shaped subunits.
                   "weights_gauss_std" : 0.12,                       # Standard deviation of the Gaussian used to set the subunit weights if they are option 'gauss'. In units of *resolution*, i.e. simulation area size.
-                  "poisson_coefficient" : 'realistic'}              # If the spiking process is set to 'poisson', this defines the coefficient between the RGC response and the expected value of the Poisson distribution. 'realistic' means a realistic coefficient based on the response to locally sparse noise is calculated.
+                  "poisson_seed" : None,                            # Non-negative seed of the random number generator of the spiking poisson process. If None, a random seed is used.
+                  "spiking_coefficient" : 'realistic',              # Defines the coefficient between the RGC response and the expected number of spikes in response. 'realistic' means a coefficient is used that leads to an average of 30 spikes in response to a full-field flash of white.
+                  "spiking_base_level" : 0.0}                       # Base spike level of the model. The expected number of spikes in response to a stimulus is increased by this value, i.e. this corresponds to a spontaneous activity or noise level.
 
 
 ###############################################################################
@@ -523,7 +525,10 @@ def Scenario_realistic_gauss(resolution, num_subunits, rng_seed, overlap_factor,
     # Calculate the center of masses of the voronoi sets
     centers = np.empty_like(points)
     for i in range(points.shape[0]):
-        centers[i] = np.mean(pixels[voronoi.ravel() == i], axis=0)
+        if np.any(voronoi.ravel() == i):
+            centers[i] = np.mean(pixels[voronoi.ravel() == i], axis=0)
+        else:
+            centers[i] = [np.nan, np.nan]
 
     # Choosing only the N sets that are closest to the screen center
     distances = np.sum(np.square(centers - size/2), axis=1)
@@ -890,24 +895,48 @@ def Output_nl_softplus(signal):
 ###############################################################################
 # Functions for the spiking process
 ###############################################################################
-def Spiking_none(response):
-    """ No spiking process. Input is returned.
+def Spiking_none(coefficient, shift, base):
+    """ No spiking process. Converts the input into the expected number of
+    spikes, giving only the statistically expected spike count, not an actual
+    spike count.
 
     Parameters
     ----------
-    response : float
-        Contains the RGC response.
+    coefficient : float
+        Coefficient between *response* and resulting expected spike count.
+    shift : float
+        Shift to be added to *response* before multiplication with
+        *coefficient*. Should be used to prevent negative expected spike
+        counts. Thus corresponds to the response to full-field black.
+    base : float
+        Base level spike count that is added to *response* after multiplication
+        with *coefficient*. Could technically also be included in *shift*, but
+        this parameter makes it more convenient to simulate spontaneous
+        activity. Should be larger than or equal to zero.
 
     Returns
     -------
-    spikes : float
-        Contains the result of the spiking process applied to *response*.
+    Spikes : function
+        Function that returns the statistically expected number of spikes for
+        a given response.
+
+        Parameters
+
+        response : float
+            Contains the RGC response.
+        Returns
+
+        float
+            The expected spike count resulting from *response*.
     """
 
-    return response
+    def Expected_spikes(response):
+        return coefficient * (response + shift) + base
+
+    return Expected_spikes
 
 
-def Spiking_poisson(coefficient, shift):
+def Spiking_poisson(coefficient, shift, rng_seed, base):
     """ Poisson spiking process.
 
     Parameters
@@ -918,6 +947,14 @@ def Spiking_poisson(coefficient, shift):
         Shift to be added to *response* before multiplication with
         *coefficient*. Should be used to prevent negative Poisson rates.
         Thus corresponds to the response to full-field black.
+    rng_seed : int
+        Non-negative seed used for randomly generating the spike number in the
+        poisson process. If None, a random seed is used.
+    base : float
+        Base level firing rate that is added to *response* after multiplication
+        with *coefficient*. Could technically also be included in *shift*, but
+        this parameter makes it more convenient to simulate spontaneous
+        activity. Should be larger than or equal to zero.
 
     Returns
     -------
@@ -934,10 +971,10 @@ def Spiking_poisson(coefficient, shift):
             The result of the spiking process applied to *response*.
     """
 
-    rng = np.random.default_rng()
+    rng = np.random.default_rng(seed=rng_seed)
 
     def Spikes(response):
-        return rng.poisson(coefficient * (response + shift))
+        return rng.poisson(coefficient * (response + shift) + base)
 
     return Spikes
 
@@ -1351,7 +1388,7 @@ class Subunit_Model:
         elif scenario == 'realistic gauss':
             self.subunits, self.subunit_params = Scenario_realistic_gauss(self.resolution,
                                                                           self.params['num_subunits'],
-                                                                          self.params['rng_seed'],
+                                                                          self.params['layout_seed'],
                                                                           self.params['overlap_factor'],
                                                                           self.params['irregularity'],
                                                                           self.params['swap_gauss_for_cosine'])
@@ -1615,10 +1652,11 @@ class Subunit_Model:
         ----------
         rgc_spiking : string
             Spiking process of the RGC. Options:
-                None: No random spiking process, model outputs firing rate.
+                None: No random spiking process, model outputs expected value
+                for spike count.
 
                 'poisson': Spiking via Poisson distribution. Model outputs
-                number of spikes.
+                actual number of spikes.
         **kwargs
             Additional keyword arguments. Check the global variable
             *DEFAULT_PARAMS* for more information.
@@ -1626,24 +1664,30 @@ class Subunit_Model:
 
         self.params.update(kwargs)
 
-        self.spiking = Spiking_none
+        # First set up a dummie spike process and find out how negative the
+        # response to full-field black is so that negative Poisson rates can be
+        # prevented
+        self.spiking = Spiking_none(1, 0, 0)
+        stim = -np.ones((self.resolution, self.resolution))
+        shift = np.abs(self.response_to_flash(stim))
+        # Next find out the response to a white flash in order to calibrate
+        # the number of spikes
+        if self.params['spiking_coefficient'] == 'realistic':
+            stim = np.ones((self.resolution, self.resolution))
+            resp = self.response_to_flash(stim)
+            coefficient = 30 / (resp + shift)
+        else:
+            coefficient = self.params['spiking_coefficient']
+
+        # Now set the spiking process with the parameters that have been
+        # determined previously
         if rgc_spiking == 'poisson':
-            # First find out how negative the response to full-field black is
-            # so that negative Poisson rates can be prevented
-            stim = -np.ones((self.resolution, self.resolution))
-            shift = np.abs(self.response_to_flash(stim))
-            # Next find out the response to a white flash in order to calibrate
-            # the number of spikes
-            if self.params['poisson_coefficient'] == 'realistic':
-                stim = np.zeros((self.resolution, self.resolution))
-                quarter = int(round(self.resolution/4))
-                stim[quarter:-quarter, quarter:-quarter] = 1
-                resp = self.response_to_flash(stim)
-                coefficient = 50 / (resp + shift)
-                self.spiking = Spiking_poisson(coefficient, shift)
-            else:
-                self.spiking = Spiking_poisson(self.params['poisson_coefficient'],
-                                               shift)
+            self.spiking = Spiking_poisson(coefficient, shift,
+                                           self.params['poisson_seed'],
+                                           self.params['spiking_base_level'])
+        else:
+            self.spiking = Spiking_none(coefficient, shift,
+                                        self.params['spiking_base_level'])
 
 
     def set_resolution(self, new_resolution):
@@ -1755,6 +1799,8 @@ class Subunit_Model:
                 stimulus = np.zeros((self.resolution, self.resolution))
                 stimulus[x, y] = 1
                 rf[x, y] = self.response_to_flash(stimulus)
+        # Baseline activity should not influence the RF
+        rf -= self.params['spiking_base_level']
         # Fit ellipse to RF
         xx, yy = np.mgrid[0:self.resolution, 0:self.resolution]
         pixels = np.transpose(np.vstack([xx.ravel(), yy.ravel()]))
